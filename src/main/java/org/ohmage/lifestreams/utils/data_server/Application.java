@@ -1,38 +1,44 @@
 package org.ohmage.lifestreams.utils.data_server;
 
-import org.apache.catalina.connector.Connector;
-import org.apache.coyote.http11.AbstractHttp11Protocol;
+import org.ohmage.lifestreams.AppConfig;
 import org.ohmage.models.OhmageServer;
-import org.ohmage.models.OhmageUser;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.context.embedded.ConfigurableEmbeddedServletContainer;
-import org.springframework.boot.context.embedded.EmbeddedServletContainerCustomizer;
-import org.springframework.boot.context.embedded.tomcat.TomcatConnectorCustomizer;
-import org.springframework.boot.context.embedded.tomcat.TomcatEmbeddedServletContainerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.ImportResource;
-import org.springframework.http.MediaType;
+import org.springframework.context.annotation.PropertySource;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
+import org.springframework.core.env.Environment;
 
 @Configuration
-@ComponentScan(basePackages={"org.ohmage.lifestreams.utils"})
 @EnableAutoConfiguration
-public class Application {
+@PropertySource("/stream.server.properties")
+public class Application extends AppConfig {
 
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
     }
 
-    @Value("${ohmage.server}")
-    String ohmageServerAddress;
+    @Autowired
+    Environment env;
     @Bean
     public OhmageServer ohmageServer(){
-    	return new OhmageServer(ohmageServerAddress);
+            return new OhmageServer(env.getProperty("ohmage.server"));
     }
-    
+    @Bean
+    public MainCotroller mainController(){
+        return new MainCotroller(ohmageServer(), streamStore(),
+                Integer.parseInt(env.getProperty("token.life.time")),
+                Integer.parseInt(env.getProperty("redis.token.store.DBIndex")));
+    }
+    @Bean
+    public SimpleCORSFilter filter(){
+        return new SimpleCORSFilter();
+    }
+}
+    /*
     // enable compression in Tomcat
 	@Bean
 	public EmbeddedServletContainerCustomizer servletContainerCustomizer() {
@@ -52,5 +58,5 @@ public class Application {
 						});
 			}
 		};
-	}
-}
+	}*/
+
