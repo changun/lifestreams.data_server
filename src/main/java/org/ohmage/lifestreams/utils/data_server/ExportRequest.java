@@ -1,18 +1,17 @@
 package org.ohmage.lifestreams.utils.data_server;
 
 import au.com.bytecode.opencsv.CSVWriter;
-import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.csv.CsvMapper;
-import com.fasterxml.jackson.dataformat.csv.CsvSchema;
-import org.mortbay.util.ByteArrayISO8859Writer;
+
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import com.fasterxml.jackson.dataformat.*;
+
 /**
  * Created by changun on 6/19/14.
  */
@@ -33,7 +32,7 @@ class ExportRequest{
         this.headers = headers;
     }
 
-    public void setRows(List<List<String>> rows) {
+    public void setRows(List<List<Object>> rows) {
         this.rows = rows;
     }
 
@@ -54,7 +53,7 @@ class ExportRequest{
         return headers;
     }
 
-    public List<List<String>> getRows() {
+    public List<List<Object>> getRows() {
         return rows;
     }
 
@@ -64,19 +63,23 @@ class ExportRequest{
         CSVWriter writer = new CSVWriter(byteWriter, ',');
         // feed in your array (or convert your data to an array)
         writer.writeNext(headers.toArray(new String[headers.size()]));
-        for(List<String> row: rows){
-            writer.writeNext(row.toArray(new String[row.size()]));
+        for(List<Object> row: rows){
+            List<String> rowVals = new ArrayList<>();
+            for(Object v: row){
+                rowVals.add(v.toString());
+            }
+            writer.writeNext(rowVals.toArray(new String[row.size()]));
         }
         writer.close();
         byteWriter.close();
         return byteBuffer.toByteArray();
     }
     public byte[] toJSON ()throws IOException {
-        CsvSchema bootstrap = CsvSchema.emptySchema().withHeader();
-        CsvMapper csvMapper = new CsvMapper();
-        MappingIterator<Map<?, ?>> mappingIterator = csvMapper.reader(Map.class).with(bootstrap).readValues(this.toCSV());
+        Map<String, Object> ret = new HashMap<>();
+        ret.put("headers", this.headers);
+        ret.put("rows", this.rows);
         ObjectMapper mapper = new ObjectMapper();
-        return mapper.writeValueAsString(mappingIterator).getBytes();
+        return mapper.writeValueAsString(ret).getBytes();
     }
     public byte[] exportBytes() throws IOException{
         if(this.getFormat().equals("JSON")){
@@ -89,5 +92,5 @@ class ExportRequest{
 
     String token, filename, format;
     List<String> headers;
-    List<List<String>> rows;
+    List<List<Object>> rows;
 }
