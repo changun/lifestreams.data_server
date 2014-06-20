@@ -1,9 +1,11 @@
 package org.ohmage.lifestreams.utils.data_server;
 
+import au.com.bytecode.opencsv.CSVWriter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.api.client.util.Value;
 import org.joda.time.DateTime;
+import org.mortbay.util.ByteArrayISO8859Writer;
 import org.ohmage.lifestreams.models.StreamRecord;
 import org.ohmage.lifestreams.stores.IStreamStore;
 import org.ohmage.models.OhmageClass;
@@ -22,7 +24,10 @@ import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.Protocol;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -55,9 +60,9 @@ public class MainCotroller {
         try {
             // check if we can sign in with the username and password
             String token = user.getToken();
-            jedis.set(token, mapper.writeValueAsString(user.getAccessibleUsers()));
+            jedis.hset(token, "accessible_users", mapper.writeValueAsString(user.getAccessibleUsers()));
             logger.info("{} sign in. Create token with {} seconds life time",
-                        user, TOKEN_LIFE_TIME_SECS);
+                    user, TOKEN_LIFE_TIME_SECS);
             jedis.expire(token, TOKEN_LIFE_TIME_SECS);
             pool.returnResource(jedis);
             Map<String, String> ret = new HashMap<>();
@@ -106,60 +111,123 @@ public class MainCotroller {
             , @RequestParam(value = "chronological", required = false, defaultValue = "true") boolean chronological)
             throws
             IOException {
-        Jedis jedis = pool.getResource();
-        // first check if the given token exists
-        if (jedis.exists(token)) {
-            // if so, check if that token has permission to access the requested user.
-            boolean hasAccessTo = mapper.readValue(jedis.get(token), List.class).contains(username);
-            if (hasAccessTo) {
-                HashMap<String, Object> ret = new HashMap<>();
-                OhmageUser requestee = new OhmageUser(ohmageServer, username, null);
-                OhmageStream stream = new OhmageStream.Builder()
-                        .observerId(observerId)
-                        .observerVer(observerVer)
-                        .streamId(streamId)
-                        .streamVer(streamVer).build();
 
-                OhmageStreamIterator.SortOrder order = chronological ?
-                        OhmageStreamIterator.SortOrder.Chronological :
-                        OhmageStreamIterator.SortOrder.ReversedChronological;
-                DateTime startDate = start != null ? new DateTime(start) : null;
-                DateTime endDate = end != null ? new DateTime(end) : null;
+            Jedis jedis = pool.getResource();
+            try {
+            // first check if the given token exists
+            if (jedis.exists(token)) {
+                // if so, check if that token has permission to access the requested user.
+                boolean hasAccessTo = mapper.readValue(
+                        jedis.hget(token, "accessible_users"),
+                        List.class).contains(username);
+                if (hasAccessTo) {
+                    HashMap<String, Object> ret = new HashMap<>();
+                    OhmageUser requestee = new OhmageUser(ohmageServer, username, null);
+                    OhmageStream stream = new OhmageStream.Builder()
+                            .observerId(observerId)
+                            .observerVer(observerVer)
+                            .streamId(streamId)
+                            .streamVer(streamVer).build();
 
-                List<StreamRecord> recs = streamStore.query(stream,
-                                                            requestee,
-                                                            startDate, endDate,
-                                                            order, maxRows);
+                    OhmageStreamIterator.SortOrder order = chronological ?
+                            OhmageStreamIterator.SortOrder.Chronological :
+                            OhmageStreamIterator.SortOrder.ReversedChronological;
+                    DateTime startDate = start != null ? new DateTime(start) : null;
+                    DateTime endDate = end != null ? new DateTime(end) : null;
 
-                List<ObjectNode> recJsons = new ArrayList<>(recs.size());
-                // covert stream record to json nodes
-                for (StreamRecord rec : recs) {
-                    ObjectNode node = rec.toObserverDataPoint();
-                    // prune unneeded columns if "columns" parameter is specified
-                    if (columns != null) {
-                        ObjectNode dataNode = (ObjectNode) node.get("data");
-                        String[] requiredCols = columns.split(",");
-                        ObjectNode filteredNode = new ObjectNode(mapper.getNodeFactory());
-                        for (String requiredCol : requiredCols) {
-                            filteredNode.put(requiredCol, dataNode.get(requiredCol));
+                    List<StreamRecord> recs = streamStore.query(stream,
+                            requestee,
+                            startDate, endDate,
+                            order, maxRows);
+
+                    List<ObjectNode> recJsons = new ArrayList<>(recs.size());
+                    // covert stream record to json nodes
+                    for (StreamRecord rec : recs) {
+                        ObjectNode node = rec.toObserverDataPoint();
+                        // prune unneeded columns if "columns" parameter is specified
+                        if (columns != null) {
+                            ObjectNode dataNode = (ObjectNode) node.get("data");
+                            String[] requiredCols = columns.split(",");
+                            ObjectNode filteredNode = new ObjectNode(mapper.getNodeFactory());
+                            for (String requiredCol : requiredCols) {
+                                filteredNode.put(requiredCol, dataNode.get(requiredCol));
+                            }
+                            node.put("data", filteredNode);
                         }
-                        node.put("data", filteredNode);
+                        recJsons.add(node);
                     }
-                    recJsons.add(node);
+
+                    return recJsons;
+                } else {
+
+                    throw new WrongOhmageCredential();
                 }
-                pool.returnResource(jedis);
-                return recJsons;
+            } else {
+                throw new NotSignedInException();
             }
-            else{
-                pool.returnResource(jedis);
-                throw new WrongOhmageCredential();
-            }
-        }else{
+        }finally {
             pool.returnResource(jedis);
-            throw new NotSignedInException();
         }
 
     }
+
+
+    @RequestMapping("/export")
+    public
+    @ResponseBody
+    Map export(  HttpServletRequest request ) throws IOException{
+        ExportRequest req = mapper.readValue(request.getInputStream(), ExportRequest.class);
+        Jedis jedis = pool.getResource();
+        try {
+            // first check if the given token exists
+            if (jedis.exists(req.token)) {
+                byte[] bytes = req.exportBytes();
+                jedis.hset(req.token.getBytes(), "file".getBytes(), bytes);
+                jedis.hset(req.token, "filename", req.getFilename());
+                Map<String, String> ret = new HashMap<>();
+                ret.put("link", String.format("file?token=%s&filename=%s", req.token, req.getFilename()));
+                return ret;
+            } else {
+                throw new WrongOhmageCredential();
+            }
+        }finally {
+            pool.returnResource(jedis);
+        }
+    }
+    @RequestMapping("/file")
+    public
+    void file(  @RequestParam(value = "token") String token,
+               @RequestParam(value = "filename") String filename,
+               HttpServletResponse response) throws IOException{
+
+        Jedis jedis = pool.getResource();
+        try {
+            // first check if the given token exists
+            if (jedis.exists(token)) {
+                String storedFile = jedis.hget(token, "filename");
+                if (storedFile != null && storedFile.equals(filename)) {
+                    byte[] bytes = jedis.hget(token.getBytes(), "file".getBytes());
+
+                    // set content attributes for the response
+                    response.setContentType("application/octet-stream");
+                    response.setContentLength(bytes.length);
+                    // set headers for the response
+                    String headerKey = "Content-Disposition";
+                    String headerValue = String.format("attachment; filename=\"%s\"",
+                            filename);
+                    response.setHeader(headerKey, headerValue);
+                    // get output stream of the response
+                    OutputStream outStream = response.getOutputStream();
+                    outStream.write(bytes);
+                    return;
+                }
+            }
+            throw new WrongOhmageCredential();
+        }finally {
+            pool.returnResource(jedis);
+        }
+    }
+
     public MainCotroller(OhmageServer server, IStreamStore streamStore, int tokenLifeTimeSecs, int tokenDBIndex){
         this.TOKEN_LIFE_TIME_SECS = tokenLifeTimeSecs;
         this. pool = new JedisPool(new JedisPoolConfig(),

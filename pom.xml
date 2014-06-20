@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<groupId>org.ohmage</groupId>
-	<artifactId>mobility_dashboard</artifactId>
+	<artifactId>data_server</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 
 	<name>MobilityDashboard</name>
@@ -45,15 +45,26 @@
 			<artifactId>commons-lang3</artifactId>
 			<version>3.0</version>
 		</dependency>
-	    <dependency>
-			<groupId>org.ohmage</groupId>
-			<artifactId>lifestreams</artifactId>
-			<version>0.0.2-SNAPSHOT</version>
-		 </dependency>
-	</dependencies>
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-csv</artifactId>
+            <version>2.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.ohmage</groupId>
+            <artifactId>lifestreams</artifactId>
+            <version>0.0.2-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>net.sf.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>2.3</version>
+        </dependency>
+
+    </dependencies>
 
 	<properties>
-		<start-class>org.ohmage.mobility_dashboard.Application</start-class>
+		<start-class>org.ohmage.lifestreams.utils.data_server.Application</start-class>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <java.version>1.7</java.version>
